@@ -3,59 +3,71 @@ package jwt
 import (
 	"errors"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/SermoDigital/jose/crypto"
+	"github.com/SermoDigital/jose/jws"
+	"github.com/SermoDigital/jose/jwt"
 	"golang.org/x/net/context"
 
 	"github.com/go-kit/kit/endpoint"
 )
 
 const (
-	// JWTContextKey holds the key used to store JWT in the context
-	JWTContextKey = "JWT"
+	// EncodedJWTContextKey holds the key used to store an encoded JWT in the context
+	EncodedJWTContextKey = "EncodedJWT"
+	// JWTContextKey holds the key used to store a JWT in the context
+	JWTClaimsContextKey = "JWTClaims"
 )
 
 var (
 	ErrTokenNotFound = errors.New("Token not present")
-	ErrExpiredToken  = errors.New("Token expired")
-	ErrInvalidToken  = errors.New("Token is invalid")
+	ErrNotJWSToken   = errors.New("JWT isn't a JWS structures; JWE isn't supported")
+	ErrNotJWT        = errors.New("Token is not a JWT")
+	ErrNoKIDHeader   = errors.New("JWT token doens't have 'ki' header")
+	ErrKIDNotFound   = errors.New("Not Found Key ID")
 )
 
-func AuthenticateRequests(keyfunc jwt.Keyfunc) endpoint.Middleware {
+type KeySet map[string]struct {
+	Method crypto.SigningMethod
+	Key    []byte
+}
+
+func AuthenticateRequests(keys KeySet, validators *jwt.Validator) endpoint.Middleware {
 	return func(next endpoint.Endpoint) endpoint.Endpoint {
 		return func(ctx context.Context, request interface{}) (interface{}, error) {
-			token, ok = ctx.Value(JWTContextKey).(string)
+			encodedToken, ok = ctx.Value(JWTContextKey).([]byte)
 			if !ok {
 				return nil, ErrTokenNotFound
 			}
 
-			if err := validate(token, keyfunc); err != nil {
+			jwsToken, err := jws.ParseJWT(encodedToken)
+			switch err {
+			case nil:
+			case jws.ErrHoldJWE:
+				return nil, ErrNotJWSToken
+			case jws.ErrIsNotJWT:
+				return nil, ErrNotJWT
+			default:
 				return nil, err
 			}
 
-			return next(ctx, request)
+			// To avoid critical vulnerability related with "alg" header, we force the tokens
+			// have the optional "kid" header and we ignore the value of "alg" header
+			// See https://auth0.com/blog/2015/03/31/critical-vulnerabilities-in-json-web-token-libraries/
+			kid, ok := jwsToken.Protected()["kid"]
+			if !ok {
+				return nil, ErrNoKIDHeader
+			}
+
+			kEntry, ok := keys[kid]
+			if !ok {
+				return nil, ErrKIDNotFound
+			}
+
+			if err := jwsToken.Validate(kEntry.Key, kEntry.SigningMethod, validator); err != nil {
+				return nil, err
+			}
+
+			return next(context.WithValue(ctx, JWTClaimsContextKey, jwsToken.Claims()), request)
 		}
 	}
-}
-
-func validate(token string, keyfunc jw.Keyfunc) error {
-	ptoken, err := jwt.Parse(token, keyfunc)
-	if err != nil {
-		verr, ok := err.(*jwt.ValidationError)
-		if !ok {
-			return err
-		}
-
-		if verr.Errors == jwt.ValidationErrorExpired {
-			return ErrExpiredToken
-		}
-
-		// TODO evalute if expose fine grain errors github.com/dgrijalva/jwt-go/errors.go
-		return verr.Inner
-	}
-
-	if !ptoken.Valid {
-		return ErrInvalidToken
-	}
-
-	return nil
 }
