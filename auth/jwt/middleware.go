@@ -31,6 +31,12 @@ type KeySet map[string]struct {
 	Key    []byte
 }
 
+// AuthenticateRequests returns a server.Middleware that extracts an JWT token from the
+// context and verifies it, adding the claims, which contains, in the context or returning
+// and error if it's invalid.
+// KeySet identifies pairs of Signing methods and keys which can be used by the signer and
+// an optional validator for custom validation
+// See https://godoc.org/github.com/SermoDigital/jose/jwt#Validator
 func AuthenticateRequests(keys KeySet, validators *jwt.Validator) endpoint.Middleware {
 	return func(next endpoint.Endpoint) endpoint.Endpoint {
 		return func(ctx context.Context, request interface{}) (interface{}, error) {
@@ -63,7 +69,13 @@ func AuthenticateRequests(keys KeySet, validators *jwt.Validator) endpoint.Middl
 				return nil, ErrKIDNotFound
 			}
 
-			if err := jwsToken.Validate(kEntry.Key, kEntry.SigningMethod, validator); err != nil {
+			if validator == nil {
+				err = jwsToken.Validate(kEntry.Key, kEntry.SigningMethod)
+			} else {
+				err = jwsToken.Validate(kEntry.Key, kEntry.SigningMethod, validator)
+			}
+
+			if err != nil {
 				return nil, err
 			}
 
