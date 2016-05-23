@@ -14,9 +14,11 @@ const (
 	JWTContextKey = "JWT"
 )
 
-var ErrTokenNotFound = errors.New("Token not present")
-var ErrExpiredToken = errors.New("Token expired")
-var ErrInvalidToken = errors.New("Token is invalid")
+var (
+	ErrTokenNotFound = errors.New("Token not present")
+	ErrExpiredToken  = errors.New("Token expired")
+	ErrInvalidToken  = errors.New("Token is invalid")
+)
 
 func AuthenticateRequests(keyfunc jwt.Keyfunc) endpoint.Middleware {
 	return func(next endpoint.Endpoint) endpoint.Endpoint {
@@ -27,7 +29,7 @@ func AuthenticateRequests(keyfunc jwt.Keyfunc) endpoint.Middleware {
 			}
 
 			if err := validate(token, keyfunc); err != nil {
-				return err
+				return nil, err
 			}
 
 			return next(ctx, request)
