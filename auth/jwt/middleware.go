@@ -19,11 +19,12 @@ const (
 )
 
 var (
-	ErrTokenNotFound = errors.New("Token not present")
-	ErrNotJWSToken   = errors.New("JWT isn't a JWS structures; JWE isn't supported")
-	ErrNotJWT        = errors.New("Token is not a JWT")
-	ErrNoKIDHeader   = errors.New("JWT token doens't have 'ki' header")
-	ErrKIDNotFound   = errors.New("Not Found Key ID")
+	ErrTokenNotFound   = errors.New("Token not present")
+	ErrNotJWSToken     = errors.New("JWT isn't a JWS structures; JWE isn't supported")
+	ErrNotJWT          = errors.New("Token is not a JWT")
+	ErrNoKIDHeader     = errors.New("JWT token doens't have 'kid' header")
+	ErrKIDNotFound     = errors.New("Not Found Key ID")
+	ErrInvalidKIDValue = errors.New("'kid' token header value is invalid")
 )
 
 type KeySet map[string]struct {
@@ -37,18 +38,18 @@ type KeySet map[string]struct {
 // KeySet identifies pairs of Signing methods and keys which can be used by the signer and
 // an optional validator for custom validation
 // See https://godoc.org/github.com/SermoDigital/jose/jwt#Validator
-func AuthenticateRequests(keys KeySet, validators *jwt.Validator) endpoint.Middleware {
+func AuthenticateRequests(keys KeySet, validator *jwt.Validator) endpoint.Middleware {
 	return func(next endpoint.Endpoint) endpoint.Endpoint {
 		return func(ctx context.Context, request interface{}) (interface{}, error) {
-			encodedToken, ok = ctx.Value(JWTContextKey).([]byte)
+			encodedToken, ok := ctx.Value(EncodedJWTContextKey).([]byte)
 			if !ok {
 				return nil, ErrTokenNotFound
 			}
 
-			jwsToken, err := jws.ParseJWT(encodedToken)
+			jwsToken, err := jws.Parse(encodedToken)
 			switch err {
 			case nil:
-			case jws.ErrHoldJWE:
+			case jws.ErrHoldsJWE:
 				return nil, ErrNotJWSToken
 			case jws.ErrIsNotJWT:
 				return nil, ErrNotJWT
@@ -56,30 +57,40 @@ func AuthenticateRequests(keys KeySet, validators *jwt.Validator) endpoint.Middl
 				return nil, err
 			}
 
+			if !jwsToken.IsJWT() {
+				return nil, ErrNotJWT
+			}
+
 			// To avoid critical vulnerability related with "alg" header, we force the tokens
 			// have the optional "kid" header and we ignore the value of "alg" header
 			// See https://auth0.com/blog/2015/03/31/critical-vulnerabilities-in-json-web-token-libraries/
-			kid, ok := jwsToken.Protected()["kid"]
+			kidv, ok := jwsToken.Protected()["kid"]
 			if !ok {
 				return nil, ErrNoKIDHeader
 			}
 
-			kEntry, ok := keys[kid]
+			kidvs, ok := kidv.(string)
+			if !ok {
+				return nil, ErrInvalidKIDValue
+			}
+
+			kEntry, ok := keys[kidvs]
 			if !ok {
 				return nil, ErrKIDNotFound
 			}
 
+			jwtToken := jwsToken.(jwt.JWT)
 			if validator == nil {
-				err = jwsToken.Validate(kEntry.Key, kEntry.SigningMethod)
+				err = jwtToken.Validate(kEntry.Key, kEntry.Method)
 			} else {
-				err = jwsToken.Validate(kEntry.Key, kEntry.SigningMethod, validator)
+				err = jwtToken.Validate(kEntry.Key, kEntry.Method, validator)
 			}
 
 			if err != nil {
 				return nil, err
 			}
 
-			return next(context.WithValue(ctx, JWTClaimsContextKey, jwsToken.Claims()), request)
+			return next(context.WithValue(ctx, JWTClaimsContextKey, jwtToken.Claims()), request)
 		}
 	}
 }
