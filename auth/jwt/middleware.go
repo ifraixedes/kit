@@ -27,6 +27,8 @@ var (
 	ErrInvalidKIDValue = errors.New("'kid' token header value is invalid")
 )
 
+type Claims map[string]interface{}
+
 type KeySet map[string]struct {
 	Method crypto.SigningMethod
 	Key    []byte
@@ -46,7 +48,7 @@ func AuthenticateRequests(keys KeySet, validator *jwt.Validator) endpoint.Middle
 				return nil, ErrTokenNotFound
 			}
 
-			jwsToken, err := jws.Parse(encodedToken)
+			jwtToken, err := jws.ParseJWT(encodedToken)
 			switch err {
 			case nil:
 			case jws.ErrHoldsJWE:
@@ -57,8 +59,9 @@ func AuthenticateRequests(keys KeySet, validator *jwt.Validator) endpoint.Middle
 				return nil, err
 			}
 
-			if !jwsToken.IsJWT() {
-				return nil, ErrNotJWT
+			jwsToken, err := jws.Parse(encodedToken)
+			if err != nil {
+				return nil, err
 			}
 
 			// To avoid critical vulnerability related with "alg" header, we force the tokens
@@ -79,7 +82,6 @@ func AuthenticateRequests(keys KeySet, validator *jwt.Validator) endpoint.Middle
 				return nil, ErrKIDNotFound
 			}
 
-			jwtToken := jwsToken.(jwt.JWT)
 			if validator == nil {
 				err = jwtToken.Validate(kEntry.Key, kEntry.Method)
 			} else {
@@ -90,7 +92,7 @@ func AuthenticateRequests(keys KeySet, validator *jwt.Validator) endpoint.Middle
 				return nil, err
 			}
 
-			return next(context.WithValue(ctx, JWTClaimsContextKey, jwtToken.Claims()), request)
+			return next(context.WithValue(ctx, JWTClaimsContextKey, Claims(jwtToken.Claims())), request)
 		}
 	}
 }
