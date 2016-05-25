@@ -30,27 +30,10 @@ func TestAuthenticateRequests(t *testing.T) {
 	}
 
 	epCtx := resp.(context.Context)
-	if clv := epCtx.Value(JWTClaimsContextKey); clv != nil {
-		cl, ok := clv.(Claims)
-		if !ok {
-			t.Fatalf("Context should contains a Claims type value")
-		}
-
-		_, ok = cl["name"]
-		if !ok {
-			t.Errorf("Claims in the context doens't contain the token claims")
-		}
-
-		nameValue, ok := cl["name"].(string)
-		if ok {
-			if nameValue != "test" {
-				t.Errorf("Invalid 'name' value; want: test, got: %s ", nameValue)
-			}
-		} else {
-			t.Error("Expected to find 'name' to be a string in the claims")
-		}
-	} else {
-		t.Errorf("Expected to find the token claims in the context")
+	cl := getClaimsFromContext(t, epCtx)
+	nameValue := getStringClaim(t, cl, "name")
+	if nameValue != "test" {
+		t.Errorf("Invalid 'name' value; want: test, got: %s ", nameValue)
 	}
 }
 
@@ -73,4 +56,35 @@ func createJWTToken(t *testing.T, key []byte, method crypto.SigningMethod, prote
 
 func returnCtxEndpoint(ctx context.Context, request interface{}) (interface{}, error) {
 	return ctx, nil
+}
+
+func getClaimsFromContext(t *testing.T, ctx context.Context) Claims {
+	clv := ctx.Value(JWTClaimsContextKey)
+
+	if clv != nil {
+		cl, ok := clv.(Claims)
+		if !ok {
+			t.Fatalf("Context should contains a Claims type value")
+			return nil
+		}
+
+		return cl
+	}
+
+	t.Fatalf("Context doens't contain the token claims")
+	return nil
+}
+
+func getStringClaim(t *testing.T, cl Claims, key string) string {
+	_, ok := cl[key]
+	if !ok {
+		t.Errorf("Claims in the context doens't contain the a value for %s key", key)
+	}
+
+	val, ok := cl[key].(string)
+	if !ok {
+		t.Errorf("Expected to find %s to be a string in the claims", key)
+	}
+
+	return val
 }
