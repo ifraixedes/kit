@@ -13,7 +13,7 @@ import (
 
 // ToContext returns a function that satisfies transport/http.ServerBefore.
 // It checks if the request contains "Authorization: BEARER <<token>>" header and
-// in such case, it extracts the value and saves it into the context
+// in such case, it extracts the value and saves it into the context as []byte
 func ToContext() http.RequestFunc {
 	return func(ctx context.Context, r *stdhttp.Request) context.Context {
 		token, ok := extractTokenFromAuthHeader(r.Header.Get("Authorization"))
@@ -27,12 +27,12 @@ func ToContext() http.RequestFunc {
 
 // ToGRPCContext returns a function that satisfies transport/grcp.ServerBefore.
 // It chcks if the request contains "Authorization: BEARER <<token>>" header and
-// in such case, it extracts the token and saves it into the context
+// in such case, it extracts the token and saves it into the context as []byte
 func ToGRPCContext() grpc.RequestFunc {
 	return func(ctx context.Context, md *metadata.MD) context.Context {
 		umd := *md
 		auth, ok := umd["Authorization"]
-		if !ok || len(auth) > 0 {
+		if !ok || len(auth) == 0 {
 			return ctx
 		}
 
